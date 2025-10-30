@@ -1,0 +1,21 @@
+{
+  "scene_number": 1,
+  "primary": {
+    "name": "여게아_1화_011.jpg",
+    "url": "https://example.com/image011.jpg"
+  },
+  "alternatives": [
+    {
+      "name": "여게아_1화_002.jpg",
+      "url": "https://example.com/image002.jpg"
+    },
+    {
+      "name": "여게아_1화_036.jpg",
+      "url": "https://example.com/image036.jpg"
+    }
+  ],
+  "audio": {
+    "url": "https://example.com/scene_001.mp3",
+    "duration": 3.2
+  }
+}

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <title>씬 이미지 비교 GUI</title>
+  <style>
+    body {
+      background-color: #0d0d0d;
+      color: #fff;
+      font-family: "Pretendard", "Noto Sans KR", sans-serif;
+      text-align: center;
+      margin: 0;
+      user-select: none;
+      -webkit-user-drag: none;
+
+      /* ▼ [수정] 상단/하단 고정 UI를 위한 body 패딩 추가 */
+      padding-top: 150px;
+      /* 고정된 헤더의 높이만큼 여백 */
+      padding-bottom: 90px;
+      /* 고정된 컨트롤의 높이만큼 여백 */
+    }
+
+    /* ▼ [추가] 상단 고정 헤더 컨테이너 */
+    .header-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      background-color: #0d0d0d;
+      z-index: 100;
+      padding: 20px 30px 15px 30px;
+      box-sizing: border-box;
+      /* 패딩이 너비에 포함되도록 설정 */
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+    }
+
+    /* ▼ [수정] 하단 고정 컨트롤 */
+    .controls {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      background-color: #0d0d0d;
+      z-index: 100;
+      padding: 20px 30px;
+      box-sizing: border-box;
+      box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.7);
+    }
+
+    h2 {
+      font-size: 26px;
+      margin-top: 0;
+      /* ▼ [수정] 헤더 컨테이너 내부 여백 조정 */
+      margin-bottom: 10px;
+    }
+
+    p {
+      font-size: 16px;
+      color: #bbb;
+      margin-top: 0;
+      /* ▼ [수정] 헤더 컨테이너 내부 여백 조정 */
+      margin-bottom: 15px;
+    }
+
+    #zoomControls {
+      margin-bottom: 0;
+      /* ▼ [수정] 헤더 컨테이너 내부 여백 조정 */
+    }
+
+    /* ▼ [추가] 메인 콘텐츠 (스크롤 영역) */
+    .main-content {
+      padding: 0 30px;
+      /* 좌우 여백 */
+    }
+
+    .scene-section {
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      gap: 20px;
+      overflow-x: auto;
+      border-top: 1px solid #333;
+      padding-top: 20px;
+    }
+
+    .cut-block {
+      display: inline-block;
+      text-align: center;
+      margin: 0 auto;
+    }
+
+    .cut-title {
+      color: #f7d794;
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+
+    .merged-container {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      line-height: 0;
+      margin: 0 auto;
+      padding: 0;
+      width: 400px;
+      transform-origin: top center;
+      transition: transform 0.15s linear;
+    }
+
+    .merged-img {
+      display: block;
+      width: 100%;
+    }
+
+    .guide-canvas {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      cursor: crosshair;
+    }
+
+    button {
+      background-color: #333;
+      color: white;
+      padding: 10px 18px;
+      margin: 0 5px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      background-color: #555;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    #saveBtn.active {
+      background-color: #007bff;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="header-container">
+    <h2 id="sceneTitle">씬 로딩 중...</h2>
+    <p id="narrationText"></p>
+
+    <div id="zoomControls">
+      <button id="zoomOut">- 축소</button>
+      <button id="zoomIn">+ 확대</button>
+      <span id="zoomLevel" style="margin-left:10px; color:#bbb;">100%</span>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div id="cutsContainer"></div>
+  </div>
+
+  <div class="controls">
+    <button id="prevBtn">이전</button>
+    <button id="nextBtn">다음</button>
+    <button id="saveBtn" disabled>저장하기</button>
+  </div>
+
+  <script>
+    const rawJobData = {{ job | tojson }};
+    const jobData = Array.isArray(rawJobData) ? rawJobData[0] : rawJobData;
+
+    // 👈 [추가] 현재 작업의 job_id를 JS 변수로 저장
+    const JOB_ID = {{ job_id | tojson }};
+
+    const scenes = jobData.scenes || [];
+    const allImages = jobData.all_images || [];
+    const imageMap = Object.fromEntries(allImages.map(i => [i.name, i.url]));
+    let currentIndex = 0, zoomScale = 1.0;
+    const guides = {};
+
+    const sceneTitle = document.getElementById("sceneTitle");
+    const narrationText = document.getElementById("narrationText");
+    const cutsContainer = document.getElementById("cutsContainer");
+    const saveBtn = document.getElementById("saveBtn");
+
+    // 🔹 줌 컨트롤
+    document.getElementById("zoomIn").onclick = () => { zoomScale = Math.min(zoomScale + 0.1, 2.0); updateZoom(); };
+    document.getElementById("zoomOut").onclick = () => { zoomScale = Math.max(zoomScale - 0.1, 0.5); updateZoom(); };
+    function updateZoom() {
+      document.querySelectorAll(".merged-container").forEach(c => c.style.transform = `scale(${zoomScale})`);
+      document.getElementById("zoomLevel").innerText = `${Math.round(zoomScale * 100)}%`;
+    }
+
+    function proxyUrl(url) { return `/image_proxy?url=${encodeURIComponent(url)}`; }
+
+    function getAdjacentImages(name) {
+      if (!name) return []; // 👈 [추가] name이 null일 경우 방어 코드
+      const match = name.match(/(\d+)\.jpg$/);
+      if (!match) return [];
+      const base = parseInt(match[1], 10);
+      const prev = name.replace(match[1], String(base - 1).padStart(match[1].length, "0"));
+      const next = name.replace(match[1], String(base + 1).padStart(match[1].length, "0"));
+      return [prev, next];
+    }
+
+    function renderMergedImage(name, type, sceneNum) {
+      if (!name || !imageMap[name]) return "";
+      const [prev, next] = getAdjacentImages(name);
+      const imgs = [prev, name, next]
+        .filter(n => imageMap[n]) // 👈 [수정] imageMap[n]이 있는지 확인
+        .map(n => `<img class="merged-img" src="${proxyUrl(imageMap[n])}" alt="${n}">`)
+        .join("");
+      return `
+        <div class="merged-container" data-scene="${sceneNum}" data-type="${type}">
+          ${imgs}
+          <canvas class="guide-canvas"></canvas>
+        </div>`;
+    }
+
+    // 🔹 가이드 로직
+    function setupGuideCanvas() {
+      document.querySelectorAll(".merged-container").forEach(container => {
+        const imgs = container.querySelectorAll("img");
+        if (imgs.length === 0) return; // 👈 [추가] 이미지가 없으면 캔버스 설정 안함
+
+        const canvas = container.querySelector(".guide-canvas");
+        const ctx = canvas.getContext("2d");
+
+        Promise.all(Array.from(imgs).map(img => new Promise(res => img.complete ? res() : img.onload = res)))
+          .then(() => {
+            // 👈 [추가] 첫 번째 이미지가 로드되었는지 확인
+            if (!imgs[0] || !imgs[0].clientWidth || !imgs[0].clientHeight) {
+              console.warn(`이미지 크기 0, 캔버스 설정 건너뜀: ${container.dataset.scene}_${container.dataset.type}`);
+              return;
+            }
+            const totalHeight = Array.from(imgs).reduce((sum, img) => sum + img.clientHeight, 0);
+            const width = imgs[0].clientWidth;
+            canvas.width = width;
+            canvas.height = totalHeight;
+
+            let startX, startY, isDrawing = false, currentWidth = 0, currentHeight = 0;
+            const key = `${container.dataset.scene}_${container.dataset.type}`;
+
+            // ✅ 기본 우클릭 메뉴 비활성화
+            canvas.oncontextmenu = e => e.preventDefault();
+
+            // ✅ 마우스 다운
+            canvas.onmousedown = e => {
+              if (e.button === 2) { // 👉 오른쪽 클릭: 가이드 삭제
+                delete guides[key];
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                console.log("🗑️ 가이드 삭제:", key);
+                saveBtn.disabled = Object.keys(guides).length === 0; // 👈 [수정] 가이드가 0개면 저장 비활성화
+                return;
+              }
+
+              const rect = canvas.getBoundingClientRect();
+              startX = e.clientX - rect.left;
+              startY = e.clientY - rect.top;
+              isDrawing = true;
+            };
+
+            // ✅ 마우스 이동 중 가이드 표시
+            canvas.onmousemove = e => {
+              if (!isDrawing) return;
+              const rect = canvas.getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const y = e.clientY - rect.top;
+              const dx = x - startX, dy = y - startY;
+              const targetRatio = 9 / 16;
+              let width = dx, height = dy;
+
+              if (Math.abs(dx / dy) > targetRatio)
+                width = Math.sign(dx) * Math.abs(dy) * targetRatio;
+              else
+                height = Math.sign(dy) * Math.abs(dx) / targetRatio;
+
+              currentWidth = width; currentHeight = height;
+
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.fillStyle = "rgba(0, 255, 0, 0.25)";
+              ctx.fillRect(startX, startY, width, height);
+              ctx.strokeStyle = "rgba(0,255,0,0.9)";
+              ctx.lineWidth = 2;
+              ctx.strokeRect(startX, startY, width, height);
+            };
+
+            // ✅ 마우스 업 → 가이드 확정
+            canvas.onmouseup = e => {
+              if (!isDrawing || e.button === 2) return;
+              isDrawing = false;
+
+              // 👈 [추가] 너비나 높이가 너무 작으면 무시
+              if (Math.abs(currentWidth) < 10 || Math.abs(currentHeight) < 10) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                console.log("ℹ️ 가이드가 너무 작아 저장하지 않음");
+                return;
+              }
+
+              const rect = canvas.getBoundingClientRect();
+              const crop = {
+                x: Math.min(startX, startX + currentWidth),
+                y: Math.min(startY, startY + currentHeight),
+                w: Math.abs(currentWidth),
+                h: Math.abs(currentHeight),
+                display_w: canvas.width,
+                display_h: canvas.height
+              };
+
+              guides[key] = crop;
+              console.log("🎯 가이드 저장:", key, crop);
+
+              // 👈 [수정] 가이드가 1개라도 있으면 저장 버튼 활성화
+              saveBtn.disabled = false;
+
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.fillStyle = "rgba(0, 255, 0, 0.2)";
+              ctx.fillRect(crop.x, crop.y, crop.w, crop.h);
+              ctx.strokeStyle = "rgba(0,255,0,0.9)";
+              ctx.lineWidth = 2;
+              ctx.strokeRect(crop.x, crop.y, crop.w, crop.h);
+            };
+
+            // ✅ 기존 가이드 복원
+            if (guides[key]) {
+              const g = guides[key];
+              ctx.fillStyle = "rgba(0, 255, 0, 0.2)";
+              ctx.fillRect(g.x, g.y, g.w, g.h);
+              ctx.strokeStyle = "rgba(0,255,0,0.9)";
+              ctx.lineWidth = 2;
+              ctx.strokeRect(g.x, g.y, g.w, g.h);
+            }
+          });
+      });
+    }
+
+
+    // 🔹 씬 렌더링
+    function renderScene() {
+      // 👈 [수정] 가이드가 1개라도 있으면 저장 버튼 활성화 (씬 이동 시 체크)
+      saveBtn.disabled = Object.keys(guides).length === 0;
+      saveBtn.classList.remove("active"); // 미리보기 단계 아니면 active 클래스 제거
+
+      if (currentIndex === scenes.length) {
+        sceneTitle.innerText = "🖼️ 미리보기 (최종 저장 전 확인)";
+        narrationText.innerText = "아래는 선택한 컷들의 crop 결과입니다. (가이드가 없는 씬은 표시되지 않습니다)";
+        cutsContainer.innerHTML = "";
+
+        // 👈 [수정] 가이드가 0개면 저장 버튼 비활성화, 1개 이상이면 활성화
+        saveBtn.disabled = Object.keys(guides).length === 0;
+        if (!saveBtn.disabled) {
+          saveBtn.classList.add("active");
+        }
+
+        // 👈 [수정] fetch payload에 job_id 추가
+        const payload = {
+          job_id: JOB_ID,
+          guides: guides
+        };
+
+        fetch("/preview_crops", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload) // 👈 [수정]
+        })
+          .then(r => r.json())
+          .then(res => {
+            // 👈 [수정] 서버 응답 형식 변경 대응
+            if (!res.ok || !res.previews) {
+              console.error("❌ 미리보기 실패:", res.message);
+              cutsContainer.innerHTML = `<p style='color:#f66'>⚠️ 미리보기 이미지를 불러올 수 없습니다. (${res.message || '서버 오류'})</p>`;
+              return;
+            }
+
+            if (Object.keys(res.previews).length === 0) {
+              cutsContainer.innerHTML = "<p style='color:#999'>✅ 가이드를 설정한 씬이 없습니다. 이전으로 돌아가 씬을 선택하세요.</p>";
+              return;
+            }
+
+            // 🖼️ 3열 그리드 레이아웃 생성
+            const grid = document.createElement("div");
+            grid.style.display = "grid";
+            grid.style.gridTemplateColumns = "repeat(3, 1fr)";
+            grid.style.gap = "20px";
+            grid.style.maxWidth = "1300px";
+            grid.style.margin = "0 auto";
+
+            // ✅ key를 숫자 기준으로 정렬 (1,2,3,...)
+            Object.entries(res.previews)
+              .sort((a, b) => {
+                const numA = parseInt(a[0].split("_")[0]);
+                const numB = parseInt(b[0].split("_")[0]);
+                return numA - numB;
+              })
+              .forEach(([key, img]) => {
+                const block = document.createElement("div");
+                block.style.textAlign = "center";
+                block.style.background = "#1a1a1a";
+                block.style.padding = "10px";
+                block.style.borderRadius = "8px";
+                block.style.boxShadow = "0 0 6px rgba(0,0,0,0.5)";
+                block.innerHTML = `
+    <div style="color:#f7d794;font-size:16px;margin-bottom:8px;">${key}</div>
+    <img src="${img}" style="width:100%;border:1px solid #444;border-radius:6px;">
+  `;
+                grid.appendChild(block);
+              });
+
+            // ✅ 실제로 화면에 추가
+            cutsContainer.innerHTML = "";
+            cutsContainer.appendChild(grid);
+          })
+          .catch(err => {
+            console.error("❌ 미리보기 생성 중 오류:", err);
+            cutsContainer.innerHTML = "<p style='color:#f66'>서버 응답 오류 발생</p>";
+          });
+
+        return;
+      }
+
+      const scene = scenes[currentIndex];
+      sceneTitle.innerText = `씬 ${scene.scene_number}`;
+      narrationText.innerText = scene.narration || "나레이션 없음";
+      let html = `<div class="scene-section">`;
+      html += `<div class="cut-block">
+        <div class="cut-title">🎬 PRIMARY CUT (${scene.primary_cut})</div>
+        ${renderMergedImage(scene.primary_cut, "primary", scene.scene_number)}
+      </div>`;
+      if (scene.alternative_cuts && scene.alternative_cuts.length > 0) {
+        scene.alternative_cuts.forEach((alt, i) => {
+          html += `<div class="cut-block">
+            <div class="cut-title">🎞️ ALTERNATIVE CUT ${i + 1} (${alt})</div>
+            ${renderMergedImage(alt, `alt${i + 1}`, scene.scene_number)}
+          </div>`;
+        });
+      }
+      html += `</div>`;
+      cutsContainer.innerHTML = html;
+      setupGuideCanvas();
+      updateZoom();
+    }
+
+    // 🔹 버튼
+    document.getElementById("nextBtn").onclick = () => { currentIndex++; renderScene(); };
+    document.getElementById("prevBtn").onclick = () => { if (currentIndex > 0) currentIndex--; renderScene(); };
+    saveBtn.onclick = () => {
+
+      if (saveBtn.disabled) return; // 👈 [추가] 비활성화 시 클릭 방지
+
+      // 👈 [수정] fetch payload에 job_id 추가
+      const payload = {
+        job_id: JOB_ID,
+        guides: guides
+      };
+
+      // 👈 [추가] 저장 중 버튼 비활성화
+      saveBtn.disabled = true;
+      saveBtn.innerText = "저장 중...";
+
+      fetch("/save_crops", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload) // 👈 [수정]
+      })
+        .then(r => r.json())
+        .then(res => {
+          if (res.ok) {
+            alert("✅ 저장 완료: " + res.message);
+          } else {
+            alert("❌ 저장 실패: " + (res.message || "알 수 없는 오류"));
+          }
+        })
+        .catch(err => alert("❌ 저장 실패: " + err))
+        .finally(() => {
+          // 👈 [추가] 저장 완료/실패 후 버튼 다시 활성화
+          saveBtn.disabled = Object.keys(guides).length === 0; // 가이드가 0개면 비활성화
+          saveBtn.innerText = "저장하기";
+        });
+    };
+
+    // ▼ [추가] 키보드 좌우 방향키 이벤트 리스너
+    document.addEventListener("keydown", (e) => {
+      // 텍스트 입력 영역 등에서는 작동하지 않도록 방지
+      if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA" || document.activeElement.isContentEditable) {
+        return;
+      }
+
+      if (e.key === "ArrowLeft") {
+        document.getElementById("prevBtn").click();
+      } else if (e.key === "ArrowRight") {
+        document.getElementById("nextBtn").click();
+      }
+    });
+
+    renderScene();
+  </script>
+</body>
+
+</html>

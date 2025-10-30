@@ -1,0 +1,33 @@
+# venv 활성화
+venv\Scripts\activate
+
+
+python app.py
+
+
+Remove-Item -Recurse -Force .git
+git rm --cached service_account.json
+git add .
+git commit -m "작업 내용 요약"
+git push origin main
+
+# 1. Git 저장소 새로 만들기
+git init -b main
+
+# 2. GitHub 원격 저장소 다시 연결
+git remote add origin https://github.com/Junwan8692/image-server.git
+
+# 3. ".gitignore" 파일 딱 하나만 먼저 추가
+git add .gitignore
+
+# 4. ".gitignore" 파일만 먼저 커밋
+git commit -m "Add .gitignore rules"
+
+# 5. 이제 나머지 모든 파일 추가 (이제 100% 무시됨)
+git add .
+
+# 6. 나머지 파일들 커밋
+git commit -m "Add all project files"
+
+# 7. GitHub에 강제로 밀어넣기 (기존의 더러운 역사 싹 덮어쓰기)
+git push --force origin main
